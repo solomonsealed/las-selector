@@ -3,21 +3,16 @@ import numpy as np
 from pathlib import Path
 import csv
 
-def chunker():
+def chunk(num_divisions=2):
     las = laspy.read("../resources/las/491000_5458000.las")
 
     # Get bounds
     min_x, max_x = las.x.min(), las.x.max()
     min_y, max_y = las.y.min(), las.y.max()
 
-    mid_x = (min_x + max_x) / 2
-    mid_y = (min_y + max_y) / 2
-
-    # Create masks for each quadrant
-    mask_NE = (las.x >= mid_x) & (las.y >= mid_y)
-    mask_NW = (las.x < mid_x) & (las.y >= mid_y)
-    mask_SE = (las.x >= mid_x) & (las.y < mid_y)
-    mask_SW = (las.x < mid_x) & (las.y < mid_y)
+    # Create grid breakpoints
+    x_edges = np.linspace(min_x, max_x, num_divisions + 1)
+    y_edges = np.linspace(min_y, max_y, num_divisions + 1)
 
     # Output directory
     output_dir = "../resources/chunks"
@@ -25,11 +20,23 @@ def chunker():
 
     metadata = []
 
-    # Collect metadata from each quadrant
-    for mask in [mask_NE, mask_NW, mask_SE, mask_SW]:
-        result = write_quadrant(las, output_dir, mask)
-        if result:
-            metadata.append(result)
+    # Loop through grid tiles
+    for i in range(num_divisions):
+        for j in range(num_divisions):
+            x_min = x_edges[i]
+            x_max = x_edges[i + 1]
+            y_min = y_edges[j]
+            y_max = y_edges[j + 1]
+
+            # Create a mask for points in this tile
+            mask = (
+                (las.x >= x_min) & (las.x < x_max) &
+                (las.y >= y_min) & (las.y < y_max)
+            )
+
+            result = write_quadrant(las, output_dir, mask, x_min, y_min, x_max, y_max)
+            if result:
+                metadata.append(result)
 
     # Save metadata as CSV
     csv_path = Path(output_dir) / "index.csv"
@@ -40,26 +47,20 @@ def chunker():
 
     print(f"📝 Metadata saved to {csv_path}")
 
-
-
-def write_quadrant(las, base_path, mask):
+def write_quadrant(las, base_path, mask, min_x, min_y, max_x, max_y):
     if mask.sum() == 0:
-        print("⚠️ Skipping empty tile")
+        print(f"⚠️ Skipping empty tile {int(min_x)}_{int(min_y)}")
         return None
 
     points = las.points[mask]
     new_las = laspy.LasData(las.header)
     new_las.points = points
 
-    min_x, max_x = las.x[mask].min(), las.x[mask].max()
-    min_y, max_y = las.y[mask].min(), las.y[mask].max()
-    num_points = mask.sum()
-
     filename = f"tile_{int(min_x)}_{int(min_y)}_{int(max_x)}_{int(max_y)}.las"
     filepath = f"{base_path}/{filename}"
     new_las.write(filepath)
 
-    print(f"✅ Saved {filename} with {num_points} points")
+    print(f"✅ Saved {filename} with {mask.sum()} points")
 
     return {
         "filename": filename,
@@ -67,5 +68,5 @@ def write_quadrant(las, base_path, mask):
         "min_y": min_y,
         "max_x": max_x,
         "max_y": max_y,
-        "num_points": num_points
+        "num_points": mask.sum()
     }
